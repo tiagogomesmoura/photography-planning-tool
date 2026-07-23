@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eclipse Scout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.133.1/Build/Cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Photography Planning Tool</p>
+        <h1>Eclipse Scout</h1>
+        <p class="hero-copy">
+          Plan solar eclipses, lunar eclipses, or general Sun and Moon photography by moving the observer pin,
+          scrubbing time, and checking sky direction, framing, and alignment for that location.
+        </p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="controls-column">
+        <div class="glass-card controls-card">
+          <h2>Observation Setup</h2>
+          <label>
+            Planning mode
+            <select id="eclipseType"></select>
+          </label>
+          <div id="eventSelectGroup">
+            <label>
+              Upcoming event
+              <select id="eventSelect"></select>
+            </label>
+          </div>
+          <label>
+            Date and time
+            <input id="dateTimeInput" type="datetime-local">
+          </label>
+          <label>
+            Time zone
+            <select id="timeZoneSelect"></select>
+          </label>
+        </div>
+
+        <div class="glass-card controls-card">
+          <h2>Camera Framing</h2>
+          <label>
+            Sensor setup
+            <select id="cameraMode">
+              <option value="preset">Camera brand and model</option>
+              <option value="manual">Manual sensor size</option>
+            </select>
+          </label>
+          <div class="coordinate-grid">
+            <label>
+              Camera brand
+              <select id="cameraBrand"></select>
+            </label>
+            <label>
+              Camera model
+              <select id="cameraModel"></select>
+            </label>
+          </div>
+          <div id="manualSensorGroup" class="coordinate-grid">
+            <label>
+              Sensor width (mm)
+              <input id="sensorWidthInput" type="number" step="0.1" min="1">
+            </label>
+            <label>
+              Sensor height (mm)
+              <input id="sensorHeightInput" type="number" step="0.1" min="1">
+            </label>
+          </div>
+          <div id="cameraPresetInfo" class="camera-preset-info" aria-label="Camera preset details">
+            <div>
+              <span class="sky-label">Sensor type</span>
+              <strong id="sensorFormatValue">Full frame</strong>
+            </div>
+            <div>
+              <span class="sky-label">Crop factor</span>
+              <strong id="cropFactorValue">1.0x</strong>
+            </div>
+          </div>
+          <div class="coordinate-grid camera-grid">
+            <label>
+              Focal length (mm)
+              <input id="focalLengthInput" type="number" step="1" min="1">
+            </label>
+            <label>
+              Framing target
+              <select id="framingBody">
+                <option value="sun">Sun</option>
+                <option value="moon">Moon</option>
+              </select>
+            </label>
+          </div>
+          <div class="fov-metrics" aria-label="Field of view metrics">
+            <div>
+              <span class="sky-label">Horizontal FoV</span>
+              <strong id="horizontalFovValue">0°</strong>
+            </div>
+            <div>
+              <span class="sky-label">Vertical FoV</span>
+              <strong id="verticalFovValue">0°</strong>
+            </div>
+            <div>
+              <span class="sky-label">Diagonal FoV</span>
+              <strong id="diagonalFovValue">0°</strong>
+            </div>
+          </div>
+          <p class="helper-text">Use a preset body or enter the sensor dimensions manually. The map FoV overlay points from the observer toward the object when an object location is set.</p>
+        </div>
+
+        <div class="glass-card info-card">
+          <h2>Event Summary</h2>
+          <dl id="eventSummary" class="summary-grid"></dl>
+        </div>
+
+        <div class="glass-card info-card">
+          <h2>Sky Geometry</h2>
+          <div class="sky-metric-grid">
+            <div>
+              <span class="sky-label">Sun azimuth</span>
+              <strong id="sunAzimuth">0°</strong>
+            </div>
+            <div>
+              <span class="sky-label">Sun altitude</span>
+              <strong id="sunAltitude">0°</strong>
+            </div>
+            <div>
+              <span class="sky-label">Moon azimuth</span>
+              <strong id="moonAzimuth">0°</strong>
+            </div>
+            <div>
+              <span class="sky-label">Moon altitude</span>
+              <strong id="moonAltitude">0°</strong>
+            </div>
+          </div>
+          <p id="statusLine" class="status-line">Waiting for event analysis.</p>
+        </div>
+      </section>
+
+      <section class="visual-column">
+        <div class="glass-card map-card">
+          <div class="map-header">
+            <div>
+              <p class="eyebrow">Observer map</p>
+              <h2>Sun and Moon direction</h2>
+            </div>
+            <p class="helper-text">Colored rays show the apparent direction from the observer at the selected time.</p>
+          </div>
+          <details class="map-section-card">
+            <summary>Observer and object locations</summary>
+            <div class="map-location-grid">
+              <div class="location-card">
+                <div class="location-card-header">
+                  <h3>Observer location</h3>
+                  <button id="geolocateButton" type="button" class="secondary">Use my location</button>
+                </div>
+                <details class="location-search-details">
+                  <summary>Search observer location</summary>
+                  <div class="map-search-grid inline-map-search-grid">
+                    <label class="search-field">
+                      Search place or coordinates
+                      <div class="search-row">
+                        <input id="viewerSearchInput" type="search" placeholder="Lisbon or 38.7223, -9.1393">
+                        <button id="viewerSearchButton" type="button">Search</button>
+                      </div>
+                    </label>
+                  </div>
+                  <div id="viewerSearchResults" class="search-results" hidden></div>
+                </details>
+                <div class="coordinate-grid">
+                  <label>
+                    Latitude
+                    <input id="latitudeInput" type="number" step="0.0001" min="-90" max="90">
+                  </label>
+                  <label>
+                    Longitude
+                    <input id="longitudeInput" type="number" step="0.0001" min="-180" max="180">
+                  </label>
+                </div>
+                <label>
+                  Elevation above sea level (m)
+                  <input id="heightInput" type="number" step="1" min="-100" max="9000">
+                </label>
+                <div class="action-row single-action-row">
+                  <button id="applyLocationButton" type="button">Apply observer coordinates</button>
+                </div>
+              </div>
+              <div class="location-card">
+                <div class="location-card-header">
+                  <h3>Object location</h3>
+                  <button id="removeObjectButton" type="button" class="secondary">Remove object</button>
+                </div>
+                <details class="location-search-details">
+                  <summary>Search object location</summary>
+                  <div class="map-search-grid inline-map-search-grid">
+                    <label class="search-field">
+                      Search place or coordinates
+                      <div class="search-row">
+                        <input id="objectSearchInput" type="search" placeholder="Monument or 38.6916, -9.2160">
+                        <button id="objectSearchButton" type="button">Search</button>
+                      </div>
+                    </label>
+                  </div>
+                  <div id="objectSearchResults" class="search-results" hidden></div>
+                </details>
+                <div class="coordinate-grid">
+                  <label>
+                    Latitude
+                    <input id="objectLatitudeInput" type="number" step="0.0001" min="-90" max="90">
+                  </label>
+                  <label>
+                    Longitude
+                    <input id="objectLongitudeInput" type="number" step="0.0001" min="-180" max="180">
+                  </label>
+                </div>
+                <label>
+                  Ground elevation above sea level (m)
+                  <input id="objectHeightInput" type="number" step="1" min="-100" max="9000">
+                </label>
+                <label>
+                  Object height above ground (m)
+                  <input id="objectExtraHeightInput" type="number" step="0.1" min="0">
+                </label>
+                <div class="action-row single-action-row">
+                  <button id="applyObjectButton" type="button">Apply object coordinates</button>
+                </div>
+              </div>
+            </div>
+          </details>
+          <details class="map-section-card snapshot-panel-details">
+            <summary>Current local snapshot</summary>
+            <div class="hero-panel map-snapshot-panel">
+              <div class="hero-metrics">
+                <div>
+                  <span id="heroCoverage" class="hero-value">0.0%</span>
+                  <span id="heroCoverageLabel" class="hero-caption">coverage</span>
+                </div>
+                <div>
+                  <span id="heroMagnitude" class="hero-value">0.000</span>
+                  <span id="heroMagnitudeLabel" class="hero-caption">magnitude</span>
+                </div>
+              </div>
+              <div class="snapshot-skyline" aria-label="Local sky altitude infographic">
+                <svg id="snapshotSkySvg" class="snapshot-stage" viewBox="0 0 420 220" aria-label="Sun and Moon altitude above the horizon"></svg>
+                <p id="snapshotSkyCaption" class="helper-text snapshot-sky-caption">Updating local sky view.</p>
+              </div>
+              <p id="visibilityBadge" class="badge neutral">Calculating</p>
+            </div>
+          </details>
+          <p class="helper-text">Search by city, place, monument, or coordinates. Clicking on the map moves the currently selected target from the footer controls below.</p>
+          <div class="slider-wrap map-slider-wrap">
+            <label>
+              Current time on selected date
+              <input id="mapTimeInput" type="time" step="60">
+            </label>
+            <label for="timeSlider">Time of day for the selected date</label>
+            <div class="slider-row">
+              <input id="timeSlider" type="range" min="0" max="1439" step="1" value="0">
+              <button id="peakCoverageButton" type="button" class="secondary slider-button">Max coverage</button>
+            </div>
+            <div class="slider-scale">
+              <span id="sliderStartLabel">00:00</span>
+              <span id="sliderPeakLabel">12:00</span>
+              <span id="sliderEndLabel">23:59</span>
+            </div>
+          </div>
+          <details class="map-section-card config-section-card">
+            <summary>Configuration file</summary>
+            <p class="helper-text config-copy">Save the current planner state to JSON, load a saved configuration file, and optionally remember the last loaded configuration as the startup default on this device.</p>
+            <div class="config-action-grid">
+              <button id="saveConfigButton" type="button">Save current config</button>
+              <button id="loadConfigButton" type="button" class="secondary">Load config file</button>
+              <button id="clearStartupConfigButton" type="button" class="secondary">Clear startup default</button>
+            </div>
+            <label class="checkbox-row">
+              <input id="rememberLoadedConfigCheckbox" type="checkbox">
+              <span>Remember the loaded config as the startup default</span>
+            </label>
+            <input id="loadConfigFileInput" type="file" accept="application/json,.json" hidden>
+            <p id="configStatusLine" class="status-line">No startup default is configured.</p>
+          </details>
+          <div class="map-toolbar" aria-label="Map layer controls">
+            <button id="toggleSunLineButton" type="button" class="secondary toggle-button is-on">Sun line</button>
+            <button id="toggleMoonLineButton" type="button" class="secondary toggle-button is-on">Moon line</button>
+            <button id="toggleFovButton" type="button" class="secondary toggle-button is-off">Camera FoV</button>
+            <button id="recenter2dMapButton" type="button" class="secondary toggle-button">Recenter on observer</button>
+          </div>
+          <div id="map"></div>
+          <div class="map-inline-controls map-inline-controls-footer" aria-label="2D map footer controls">
+            <label class="compact-select-control map-target-control">
+              <span class="compact-select-label">Map click target</span>
+              <div class="compact-select-box">
+                <span id="mapClickTargetIcon" class="compact-select-icon" aria-hidden="true">◎</span>
+                <select id="mapClickTargetSelect">
+                  <option value="observer">◎ Observer</option>
+                  <option value="object">◆ Object</option>
+                </select>
+              </div>
+            </label>
+            <label class="compact-select-control map-style-control">
+              <span class="compact-select-label">Base map</span>
+              <div class="compact-select-box compact-select-box--plain">
+                <select id="mapStyleSelect">
+                  <option value="standard">Standard</option>
+                  <option value="satellite">Satellite</option>
+                </select>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="glass-card map-card map-card-3d">
+          <div class="map-header">
+            <div>
+              <p class="eyebrow">3D Scene</p>
+              <h2>Interactive globe preview</h2>
+            </div>
+            <p class="helper-text">This panel stays synced with the same observer, object, time, lighting, and Sun or Moon direction used by the 2D map.</p>
+          </div>
+          <details class="map-section-card cesium-token-card">
+            <summary>Terrain and buildings</summary>
+            <p class="helper-text cesium-token-copy">Paste a free Cesium ion token to enable higher-detail terrain and OpenStreetMap buildings in the 3D panel. Without a token the globe still works with open imagery.</p>
+            <label>
+              Cesium ion access token
+              <input id="cesiumIonTokenInput" type="password" placeholder="Paste a Cesium ion token">
+            </label>
+            <div class="config-action-grid cesium-token-actions">
+              <button id="applyCesiumTokenButton" type="button">Enable terrain and buildings</button>
+              <button id="clearCesiumTokenButton" type="button" class="secondary">Clear saved token</button>
+            </div>
+          </details>
+          <p id="cesiumStatusLine" class="status-line">Preparing 3D globe.</p>
+          <div class="slider-wrap map-slider-wrap map-slider-wrap-3d">
+            <label>
+              Current time on selected date
+              <input id="mapTimeInput3d" type="time" step="60">
+            </label>
+            <label for="timeSlider3d">Time of day for the selected date</label>
+            <div class="slider-row">
+              <input id="timeSlider3d" type="range" min="0" max="1439" step="1" value="0">
+              <button id="peakCoverageButton3d" type="button" class="secondary slider-button">Max coverage</button>
+            </div>
+            <div class="slider-scale">
+              <span id="sliderStartLabel3d">00:00</span>
+              <span id="sliderPeakLabel3d">12:00</span>
+              <span id="sliderEndLabel3d">23:59</span>
+            </div>
+          </div>
+          <div class="map-toolbar" aria-label="3D map controls">
+            <button id="recenter3dMapButton" type="button" class="secondary toggle-button">Recenter on observer</button>
+          </div>
+          <div id="map3d"></div>
+        </div>
+
+        <div class="glass-card info-card object-card">
+          <div class="map-header object-panel-header">
+            <div>
+              <p class="eyebrow">Observer To Object</p>
+              <h2>Object reference comparison</h2>
+            </div>
+            <p class="helper-text">Compare the observer and object positions, plus Sun and Moon altitude at the object.</p>
+          </div>
+          <details class="object-metrics-details">
+            <summary>Show metrics and text details</summary>
+            <label>
+              Object height above ground (m)
+              <input id="objectPanelHeightInput" type="number" step="0.1" min="0">
+            </label>
+            <div id="objectMetrics" class="object-metric-grid"></div>
+            <p id="objectStatusLine" class="status-line">Add an object location to compare it against the observer position.</p>
+          </details>
+          <div class="object-profile-wrap">
+            <svg id="objectProfileSvg" class="object-profile-stage" viewBox="0 0 560 300" aria-label="Observer and object relation infographic"></svg>
+            <div id="objectProfileLegend" class="object-profile-legend" aria-label="Observer and object comparison legend"></div>
+          </div>
+        </div>
+
+        <div id="phaseCard" class="glass-card phase-card">
+          <div class="phase-header">
+            <div>
+              <p class="eyebrow">Sun And Moon Position</p>
+              <h2 id="phaseTitle">Sun and Moon alignment preview</h2>
+            </div>
+            <div class="phase-time-block">
+              <span id="currentTimeLabel">--</span>
+              <span id="timeOffsetLabel">Peak</span>
+            </div>
+          </div>
+          <div class="phase-stage-wrap">
+            <svg id="phaseSvg" class="phase-stage" viewBox="0 0 320 320" aria-label="Sun and Moon position diagram"></svg>
+            <div id="phaseDisabledNote" class="phase-disabled-note" hidden>
+              Alignment preview is only available when a solar or lunar eclipse event is selected.
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="glass-card notes-card">
+      <h2>Notes</h2>
+      <ul>
+        <li>Solar eclipse exposure and safety are not modeled here. Use certified solar filters except during totality.</li>
+        <li>Lunar eclipse obscuration is global, but visibility still depends on the Moon being above the horizon at your pin.</li>
+        <li>The app uses live astronomy calculations in the browser, so the first update after moving the map may take a second.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.133.1/Build/Cesium/Cesium.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
