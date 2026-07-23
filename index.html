@@ -327,15 +327,23 @@
             <p class="helper-text">This panel stays synced with the same observer, object, time, lighting, and Sun or Moon direction used by the 2D map.</p>
           </div>
           <details class="map-section-card cesium-token-card">
-            <summary>Terrain and buildings</summary>
-            <p class="helper-text cesium-token-copy">Paste a free Cesium ion token to enable higher-detail terrain and OpenStreetMap buildings in the 3D panel. Without a token the globe still works with open imagery.</p>
-            <label>
-              Cesium ion access token
-              <input id="cesiumIonTokenInput" type="password" placeholder="Paste a Cesium ion token">
-            </label>
-            <div class="config-action-grid cesium-token-actions">
-              <button id="applyCesiumTokenButton" type="button">Enable terrain and buildings</button>
-              <button id="clearCesiumTokenButton" type="button" class="secondary">Clear saved token</button>
+            <summary>3D map source and access</summary>
+            <p class="helper-text cesium-token-copy">Choose the 3D source for the scene. Cesium terrain and buildings need a Cesium ion token. Google Photorealistic 3D Tiles need a Google Maps Platform API key with billing enabled.</p>
+            <div class="provider-selector-grid">
+              <label class="compact-select-control provider-select-control">
+                <span class="compact-select-label">3D source</span>
+                <div class="compact-select-box compact-select-box--plain">
+                  <select id="scene3dSourceSelect">
+                    <option value="openstreetmap">OpenStreetMap globe</option>
+                    <option value="cesiumTerrain">Cesium World Terrain</option>
+                    <option value="cesiumTerrainBuildings">Cesium terrain + OSM buildings</option>
+                    <option value="googlePhotorealistic">Google Photorealistic 3D Tiles</option>
+                  </select>
+                </div>
+              </label>
+              <div class="provider-access-actions">
+                <button id="openProviderAccessButton" type="button" class="secondary">Configure provider access</button>
+              </div>
             </div>
           </details>
           <p id="cesiumStatusLine" class="status-line">Preparing 3D globe.</p>
@@ -412,6 +420,47 @@
         <li>Lunar eclipse obscuration is global, but visibility still depends on the Moon being above the horizon at your pin.</li>
         <li>The app uses live astronomy calculations in the browser, so the first update after moving the map may take a second.</li>
       </ul>
+    </div>
+
+    <div id="providerAccessModal" class="provider-access-modal" hidden>
+      <div id="providerAccessBackdrop" class="provider-access-backdrop"></div>
+      <div class="provider-access-dialog" role="dialog" aria-modal="true" aria-labelledby="providerAccessTitle">
+        <div class="provider-access-header">
+          <div>
+            <p class="eyebrow">3D Provider Access</p>
+            <h2 id="providerAccessTitle">Configure provider credentials</h2>
+          </div>
+          <button id="closeProviderAccessButton" type="button" class="secondary provider-access-close">Close</button>
+        </div>
+        <p class="helper-text">Use this dialog to save the credentials needed by premium 3D map sources. Tokens are stored in this browser only.</p>
+        <div class="provider-access-grid">
+          <section class="provider-access-card">
+            <h3>Cesium ion</h3>
+            <p class="helper-text">Required for Cesium World Terrain and Cesium OSM Buildings.</p>
+            <label>
+              Cesium ion access token
+              <input id="cesiumIonTokenInput" type="password" placeholder="Paste a Cesium ion token">
+            </label>
+            <div class="config-action-grid cesium-token-actions">
+              <button id="applyCesiumTokenButton" type="button">Save Cesium token</button>
+              <button id="clearCesiumTokenButton" type="button" class="secondary">Clear Cesium token</button>
+            </div>
+          </section>
+          <section class="provider-access-card">
+            <h3>Google Maps Platform</h3>
+            <p class="helper-text">Required for Google Photorealistic 3D Tiles. Billing and the Map Tiles API must be enabled in Google Cloud.</p>
+            <label>
+              Google Maps API key
+              <input id="googleMapsApiKeyInput" type="password" placeholder="Paste a Google Maps API key">
+            </label>
+            <div class="config-action-grid cesium-token-actions">
+              <button id="saveGoogleMapsApiKeyButton" type="button">Save Google API key</button>
+              <button id="clearGoogleMapsApiKeyButton" type="button" class="secondary">Clear Google API key</button>
+            </div>
+          </section>
+        </div>
+        <p id="providerAccessStatusLine" class="status-line">Premium 3D sources are optional. The OpenStreetMap globe works without extra credentials.</p>
+      </div>
     </div>
   </div>
 

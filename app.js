@@ -2,8 +2,10 @@
   const AstronomyLib = window.Astronomy;
   const CesiumLib = window.Cesium;
   const CESIUM_TOKEN_STORAGE_KEY = "eclipse-scout.cesium-ion-token";
+  const GOOGLE_MAPS_API_KEY_STORAGE_KEY = "eclipse-scout.google-maps-api-key";
   const STARTUP_CONFIG_STORAGE_KEY = "eclipse-scout.startup-config";
   const DEFAULT_LEAFLET_BASE_MAP = "standard";
+  const DEFAULT_SCENE3D_MODE = "cesiumTerrainBuildings";
   const SCENE3D_MARKER_IMAGES = {
     observer: createScene3dMarkerSvg("observer"),
     object: createScene3dMarkerSvg("object"),
@@ -74,8 +76,10 @@
       moonLineEntity: null,
       fovEntity: null,
       buildingsTileset: null,
+      googleTileset: null,
       supportsTerrain: false,
       supportsBuildings: false,
+      mode: DEFAULT_SCENE3D_MODE,
       lastObserverKey: "",
       initialized: false,
     },
@@ -119,7 +123,7 @@
     initMap();
     init3dMap();
     bindEvents();
-    hydrateCesiumTokenForm();
+    hydrateProviderAccessForm();
     buildEventCatalog();
     populateEventTypeOptions();
     applyStartupDefaultConfig();
@@ -147,6 +151,8 @@
       "mapClickTargetSelect",
       "mapClickTargetIcon",
       "mapStyleSelect",
+      "scene3dSourceSelect",
+      "openProviderAccessButton",
       "recenter2dMapButton",
       "viewerSearchInput",
       "viewerSearchButton",
@@ -185,9 +191,16 @@
       "toggleFovButton",
       "map3d",
       "cesiumStatusLine",
+      "providerAccessModal",
+      "providerAccessBackdrop",
+      "closeProviderAccessButton",
+      "providerAccessStatusLine",
       "cesiumIonTokenInput",
       "applyCesiumTokenButton",
       "clearCesiumTokenButton",
+      "googleMapsApiKeyInput",
+      "saveGoogleMapsApiKeyButton",
+      "clearGoogleMapsApiKeyButton",
       "eventSummary",
       "sunAzimuth",
       "sunAltitude",
@@ -255,6 +268,10 @@
     elements.mapTimeInput3d.addEventListener("change", onMapTimeInput3dChange);
     elements.mapClickTargetSelect.addEventListener("change", updateMapTargetControl);
     elements.mapStyleSelect.addEventListener("change", onMapStyleChange);
+    elements.scene3dSourceSelect.addEventListener("change", onScene3dSourceChange);
+    elements.openProviderAccessButton.addEventListener("click", () => openProviderAccessModal("Configure provider access for premium 3D sources."));
+    elements.closeProviderAccessButton.addEventListener("click", closeProviderAccessModal);
+    elements.providerAccessBackdrop.addEventListener("click", closeProviderAccessModal);
     elements.recenter2dMapButton.addEventListener("click", recenter2dMap);
     elements.recenter3dMapButton.addEventListener("click", () => recenter3dMap(true));
     bindSearchControls(elements.viewerSearchInput, elements.viewerSearchButton, elements.viewerSearchResults, "observer");
@@ -287,6 +304,8 @@
     elements.framingBody.addEventListener("change", updateCameraFromInputs);
     elements.applyCesiumTokenButton.addEventListener("click", applyCesiumIonTokenFromInput);
     elements.clearCesiumTokenButton.addEventListener("click", clearCesiumIonToken);
+    elements.saveGoogleMapsApiKeyButton.addEventListener("click", saveGoogleMapsApiKeyFromInput);
+    elements.clearGoogleMapsApiKeyButton.addEventListener("click", clearGoogleMapsApiKey);
     elements.saveConfigButton.addEventListener("click", saveCurrentConfigToFile);
     elements.loadConfigButton.addEventListener("click", () => {
       elements.loadConfigFileInput.value = "";
@@ -363,6 +382,7 @@
     elements.mapTimeInput.value = formatTimeInputValue(state.selectedDateTime, state.timeZone);
     elements.mapTimeInput3d.value = formatTimeInputValue(state.selectedDateTime, state.timeZone);
     elements.mapStyleSelect.value = state.baseMapMode;
+    elements.scene3dSourceSelect.value = state.scene3d.mode;
   }
 
   function hydrateCameraForm() {
@@ -685,7 +705,14 @@
     }
 
     try {
+      const scene3dMode = sanitizeScene3dMode(state.scene3d.mode);
       const ionToken = readCesiumIonToken();
+      const googleApiKey = readGoogleMapsApiKey();
+      const usingGoogleTiles = scene3dMode === "googlePhotorealistic";
+      state.scene3d.mode = scene3dMode;
+      if (elements.scene3dSourceSelect) {
+        elements.scene3dSourceSelect.value = scene3dMode;
+      }
       if (ionToken) {
         CesiumLib.Ion.defaultAccessToken = ionToken;
       }
@@ -703,7 +730,7 @@
         shouldAnimate: false,
         timeline: false,
         terrainProvider: new CesiumLib.EllipsoidTerrainProvider(),
-        imageryProvider: new CesiumLib.OpenStreetMapImageryProvider({
+        imageryProvider: usingGoogleTiles ? false : new CesiumLib.OpenStreetMapImageryProvider({
           url: "https://tile.openstreetmap.org/",
         }),
       });
@@ -726,12 +753,10 @@
       viewer.scene.maximumRenderTimeChange = Infinity;
       viewer.scene.screenSpaceCameraController.minimumZoomDistance = 150;
       viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2);
+      viewer.scene.globe.show = !usingGoogleTiles;
 
       state.scene3d.viewer = viewer;
       state.scene3d.initialized = true;
-      elements.cesiumStatusLine.textContent = ionToken
-        ? "3D globe ready. Attempting to load terrain and buildings."
-        : "3D globe ready with open imagery and solar lighting. Add window.CESIUM_ION_TOKEN for terrain and buildings.";
 
       window.addEventListener("resize", () => {
         if (state.scene3d.viewer && !state.scene3d.viewer.isDestroyed()) {
@@ -739,8 +764,20 @@
         }
       });
 
-      if (ionToken) {
-        void enableCesiumEnhancements();
+      if (usingGoogleTiles) {
+        void enableGooglePhotorealisticTiles(googleApiKey);
+      } else if (scene3dMode === "cesiumTerrain" || scene3dMode === "cesiumTerrainBuildings") {
+        elements.cesiumStatusLine.textContent = ionToken
+          ? "3D globe ready. Attempting to load the selected Cesium terrain source."
+          : "Cesium terrain + buildings is the default 3D source. Add a Cesium ion token to unlock terrain and building data.";
+        if (ionToken) {
+          void enableCesiumEnhancements({
+            includeTerrain: true,
+            includeBuildings: scene3dMode === "cesiumTerrainBuildings",
+          });
+        }
+      } else {
+        elements.cesiumStatusLine.textContent = "3D globe ready with open imagery and solar lighting.";
       }
     } catch (error) {
       console.error("Failed to initialize Cesium viewer.", error);
@@ -748,12 +785,36 @@
     }
   }
 
-  function hydrateCesiumTokenForm() {
-    if (!elements.cesiumIonTokenInput) {
+  function hydrateProviderAccessForm() {
+    if (!elements.cesiumIonTokenInput || !elements.googleMapsApiKeyInput) {
       return;
     }
 
     elements.cesiumIonTokenInput.value = readCesiumIonToken();
+    elements.googleMapsApiKeyInput.value = readGoogleMapsApiKey();
+  }
+
+  function openProviderAccessModal(message = "") {
+    if (!elements.providerAccessModal) {
+      return;
+    }
+
+    elements.providerAccessModal.hidden = false;
+    setProviderAccessStatus(message || "Premium 3D sources are optional. The OpenStreetMap globe works without extra credentials.");
+  }
+
+  function closeProviderAccessModal() {
+    if (!elements.providerAccessModal) {
+      return;
+    }
+
+    elements.providerAccessModal.hidden = true;
+  }
+
+  function setProviderAccessStatus(message) {
+    if (elements.providerAccessStatusLine) {
+      elements.providerAccessStatusLine.textContent = message;
+    }
   }
 
   function readCesiumIonToken() {
@@ -785,6 +846,26 @@
     }
   }
 
+  function readGoogleMapsApiKey() {
+    const directKey = typeof window.GOOGLE_MAPS_API_KEY === "string" ? window.GOOGLE_MAPS_API_KEY.trim() : "";
+    if (directKey) {
+      return directKey;
+    }
+
+    const metaTag = document.querySelector('meta[name="google-maps-api-key"]');
+    const metaKey = metaTag?.getAttribute("content")?.trim() || "";
+    if (metaKey) {
+      return metaKey;
+    }
+
+    try {
+      return window.localStorage.getItem(GOOGLE_MAPS_API_KEY_STORAGE_KEY)?.trim() || "";
+    } catch (error) {
+      console.warn("Could not read the saved Google Maps API key.", error);
+      return "";
+    }
+  }
+
   function persistCesiumIonToken(token) {
     try {
       if (token) {
@@ -799,28 +880,43 @@
     }
   }
 
+  function persistGoogleMapsApiKey(apiKey) {
+    try {
+      if (apiKey) {
+        window.localStorage.setItem(GOOGLE_MAPS_API_KEY_STORAGE_KEY, apiKey);
+      } else {
+        window.localStorage.removeItem(GOOGLE_MAPS_API_KEY_STORAGE_KEY);
+      }
+      return true;
+    } catch (error) {
+      console.warn("Could not persist the Google Maps API key.", error);
+      return false;
+    }
+  }
+
   async function applyCesiumIonTokenFromInput() {
     const token = elements.cesiumIonTokenInput?.value?.trim() || "";
     if (!token) {
-      elements.cesiumStatusLine.textContent = "Paste a Cesium ion token first, then enable terrain and buildings.";
+      const message = "Paste a Cesium ion token first, then save it.";
+      elements.cesiumStatusLine.textContent = message;
+      setProviderAccessStatus(message);
       return;
     }
 
     if (!persistCesiumIonToken(token)) {
-      elements.cesiumStatusLine.textContent = "The token could not be stored in this browser. Check private mode or browser storage settings.";
-      return;
-    }
-
-    if (!CesiumLib || !state.scene3d.viewer || state.scene3d.viewer.isDestroyed()) {
-      elements.cesiumStatusLine.textContent = "Token saved. Reload the page to finish enabling terrain and buildings.";
+      const message = "The token could not be stored in this browser. Check private mode or browser storage settings.";
+      elements.cesiumStatusLine.textContent = message;
+      setProviderAccessStatus(message);
       return;
     }
 
     CesiumLib.Ion.defaultAccessToken = token;
-    elements.cesiumStatusLine.textContent = "Token saved. Loading terrain and buildings.";
-    await enableCesiumEnhancements();
-    if (state.analysis) {
-      renderSnapshot();
+    const message = "Cesium ion token saved.";
+    elements.cesiumStatusLine.textContent = message;
+    setProviderAccessStatus(message);
+
+    if (scene3dModeNeedsCesiumToken(state.scene3d.mode)) {
+      await rebuildScene3dMap();
     }
   }
 
@@ -830,49 +926,117 @@
       elements.cesiumIonTokenInput.value = "";
     }
     resetCesiumEnhancements();
-    elements.cesiumStatusLine.textContent = "Token cleared. The 3D panel is back to the open imagery fallback without terrain or buildings.";
+    const message = "Cesium token cleared. Cesium terrain-based 3D sources now need to be configured again.";
+    elements.cesiumStatusLine.textContent = message;
+    setProviderAccessStatus(message);
     if (state.analysis) {
       renderSnapshot();
     }
   }
 
-  async function enableCesiumEnhancements() {
+  async function saveGoogleMapsApiKeyFromInput() {
+    const apiKey = elements.googleMapsApiKeyInput?.value?.trim() || "";
+    if (!apiKey) {
+      setProviderAccessStatus("Paste a Google Maps API key first, then save it.");
+      return;
+    }
+
+    if (!persistGoogleMapsApiKey(apiKey)) {
+      setProviderAccessStatus("The Google Maps API key could not be stored in this browser. Check private mode or browser storage settings.");
+      return;
+    }
+
+    setProviderAccessStatus("Google Maps API key saved.");
+    if (state.scene3d.mode === "googlePhotorealistic") {
+      await rebuildScene3dMap();
+    }
+  }
+
+  function clearGoogleMapsApiKey() {
+    persistGoogleMapsApiKey("");
+    if (elements.googleMapsApiKeyInput) {
+      elements.googleMapsApiKeyInput.value = "";
+    }
+    setProviderAccessStatus("Google Maps API key cleared.");
+    if (state.scene3d.mode === "googlePhotorealistic") {
+      state.scene3d.mode = DEFAULT_SCENE3D_MODE;
+      elements.scene3dSourceSelect.value = state.scene3d.mode;
+      void rebuildScene3dMap();
+    }
+  }
+
+  async function enableCesiumEnhancements(options = {}) {
     if (!state.scene3d.viewer || !CesiumLib) {
       return;
     }
 
-    if (state.scene3d.supportsTerrain && state.scene3d.supportsBuildings) {
-      elements.cesiumStatusLine.textContent = "3D globe ready with terrain and buildings.";
-      return;
+    const includeTerrain = options.includeTerrain !== false;
+    const includeBuildings = options.includeBuildings === true;
+
+    resetCesiumEnhancements();
+
+    if (includeTerrain) {
+      try {
+        state.scene3d.viewer.terrainProvider = await CesiumLib.createWorldTerrainAsync({
+          requestVertexNormals: true,
+          requestWaterMask: true,
+        });
+        state.scene3d.supportsTerrain = true;
+      } catch (error) {
+        console.warn("Cesium terrain could not be loaded.", error);
+      }
     }
 
-    try {
-      state.scene3d.viewer.terrainProvider = await CesiumLib.createWorldTerrainAsync({
-        requestVertexNormals: true,
-        requestWaterMask: true,
-      });
-      state.scene3d.supportsTerrain = true;
-    } catch (error) {
-      console.warn("Cesium terrain could not be loaded.", error);
-    }
-
-    try {
-      state.scene3d.buildingsTileset = await CesiumLib.createOsmBuildingsAsync();
-      state.scene3d.buildingsTileset.maximumScreenSpaceError = 1;
-      state.scene3d.buildingsTileset.skipLevelOfDetail = false;
-      state.scene3d.buildingsTileset.dynamicScreenSpaceError = false;
-      state.scene3d.buildingsTileset.immediatelyLoadDesiredLevelOfDetail = true;
-      state.scene3d.buildingsTileset.preloadWhenHidden = true;
-      state.scene3d.buildingsTileset.preloadFlightDestinations = true;
-      state.scene3d.viewer.scene.primitives.add(state.scene3d.buildingsTileset);
-      state.scene3d.supportsBuildings = true;
-    } catch (error) {
-      console.warn("Cesium OSM buildings could not be loaded.", error);
+    if (includeBuildings) {
+      try {
+        state.scene3d.buildingsTileset = await CesiumLib.createOsmBuildingsAsync();
+        state.scene3d.buildingsTileset.maximumScreenSpaceError = 1;
+        state.scene3d.buildingsTileset.skipLevelOfDetail = false;
+        state.scene3d.buildingsTileset.dynamicScreenSpaceError = false;
+        state.scene3d.buildingsTileset.immediatelyLoadDesiredLevelOfDetail = true;
+        state.scene3d.buildingsTileset.preloadWhenHidden = true;
+        state.scene3d.buildingsTileset.preloadFlightDestinations = true;
+        state.scene3d.viewer.scene.primitives.add(state.scene3d.buildingsTileset);
+        state.scene3d.supportsBuildings = true;
+      } catch (error) {
+        console.warn("Cesium OSM buildings could not be loaded.", error);
+      }
     }
 
     elements.cesiumStatusLine.textContent = state.scene3d.supportsTerrain || state.scene3d.supportsBuildings
       ? `3D globe ready${state.scene3d.supportsTerrain ? " with terrain" : ""}${state.scene3d.supportsBuildings ? `${state.scene3d.supportsTerrain ? " and" : " with"} buildings` : ""}.`
       : "3D globe ready with open imagery and solar lighting. Terrain and buildings need a valid Cesium ion token.";
+  }
+
+  async function enableGooglePhotorealisticTiles(apiKey) {
+    if (!state.scene3d.viewer || !CesiumLib) {
+      return;
+    }
+
+    if (!apiKey) {
+      elements.cesiumStatusLine.textContent = "Google Photorealistic 3D Tiles require a Google Maps API key with billing enabled.";
+      return;
+    }
+
+    try {
+      const googleTileset = new CesiumLib.Cesium3DTileset({
+        url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(apiKey)}`,
+        showCreditsOnScreen: true,
+        maximumScreenSpaceError: 1,
+        skipLevelOfDetail: false,
+        dynamicScreenSpaceError: false,
+        immediatelyLoadDesiredLevelOfDetail: true,
+        preloadWhenHidden: true,
+        preloadFlightDestinations: true,
+      });
+      state.scene3d.googleTileset = state.scene3d.viewer.scene.primitives.add(googleTileset);
+      state.scene3d.viewer.scene.globe.show = false;
+      elements.cesiumStatusLine.textContent = "Google Photorealistic 3D Tiles enabled. This mode depends on Google Maps Platform terms and billing.";
+      state.scene3d.viewer.scene.requestRender();
+    } catch (error) {
+      console.error("Google Photorealistic 3D Tiles could not be loaded.", error);
+      elements.cesiumStatusLine.textContent = "Google Photorealistic 3D Tiles could not be loaded with the saved API key.";
+    }
   }
 
   function resetCesiumEnhancements() {
@@ -882,13 +1046,74 @@
     }
 
     viewer.terrainProvider = new CesiumLib.EllipsoidTerrainProvider();
+    viewer.scene.globe.show = true;
     if (state.scene3d.buildingsTileset) {
       viewer.scene.primitives.remove(state.scene3d.buildingsTileset);
       state.scene3d.buildingsTileset = null;
     }
+    if (state.scene3d.googleTileset) {
+      viewer.scene.primitives.remove(state.scene3d.googleTileset);
+      state.scene3d.googleTileset = null;
+    }
     state.scene3d.supportsTerrain = false;
     state.scene3d.supportsBuildings = false;
     viewer.scene.requestRender();
+  }
+
+  function onScene3dSourceChange() {
+    const nextMode = sanitizeScene3dMode(elements.scene3dSourceSelect.value);
+    const requirementMessage = getScene3dRequirementMessage(nextMode);
+    state.scene3d.mode = nextMode;
+
+    if (requirementMessage) {
+      elements.cesiumStatusLine.textContent = requirementMessage;
+      openProviderAccessModal(requirementMessage);
+    }
+
+    void rebuildScene3dMap();
+  }
+
+  function sanitizeScene3dMode(value) {
+    const supportedModes = ["openstreetmap", "cesiumTerrain", "cesiumTerrainBuildings", "googlePhotorealistic"];
+    return supportedModes.includes(value) ? value : DEFAULT_SCENE3D_MODE;
+  }
+
+  function scene3dModeNeedsCesiumToken(mode) {
+    return mode === "cesiumTerrain" || mode === "cesiumTerrainBuildings";
+  }
+
+  function getScene3dRequirementMessage(mode) {
+    if (scene3dModeNeedsCesiumToken(mode) && !readCesiumIonToken()) {
+      return "This 3D source needs a Cesium ion token. Configure it in provider access first.";
+    }
+    if (mode === "googlePhotorealistic" && !readGoogleMapsApiKey()) {
+      return "Google Photorealistic 3D Tiles need a Google Maps API key with billing enabled. Configure it in provider access first.";
+    }
+    return "";
+  }
+
+  async function rebuildScene3dMap() {
+    if (state.scene3d.viewer && !state.scene3d.viewer.isDestroyed()) {
+      state.scene3d.viewer.destroy();
+    }
+    state.scene3d.viewer = null;
+    state.scene3d.observerEntity = null;
+    state.scene3d.objectEntity = null;
+    state.scene3d.sunLineEntity = null;
+    state.scene3d.moonLineEntity = null;
+    state.scene3d.fovEntity = null;
+    state.scene3d.buildingsTileset = null;
+    state.scene3d.googleTileset = null;
+    state.scene3d.supportsTerrain = false;
+    state.scene3d.supportsBuildings = false;
+    state.scene3d.initialized = false;
+    state.scene3d.lastObserverKey = "";
+
+    elements.map3d.innerHTML = "";
+    init3dMap();
+    if (state.analysis) {
+      renderSnapshot();
+    }
   }
 
   function syncMarker() {
@@ -2023,6 +2248,7 @@
     state.scene3d.moonLineEntity = null;
     state.scene3d.fovEntity = null;
     state.scene3d.buildingsTileset = null;
+    state.scene3d.googleTileset = null;
     state.scene3d.supportsTerrain = false;
     state.scene3d.supportsBuildings = false;
     state.scene3d.initialized = false;
@@ -2400,6 +2626,7 @@
       camera: { ...state.camera },
       layerToggles: { ...state.layerToggles },
       baseMapMode: state.baseMapMode,
+      scene3dMode: state.scene3d.mode,
     };
   }
 
@@ -2420,6 +2647,7 @@
       fov: config.layerToggles?.fov === true,
     };
     state.baseMapMode = config.baseMapMode === "satellite" ? "satellite" : DEFAULT_LEAFLET_BASE_MAP;
+    state.scene3d.mode = sanitizeScene3dMode(config.scene3dMode);
     applyCameraConfig(config.camera);
     state.pendingSelectedDateTime = desiredDateTime;
 
@@ -2434,6 +2662,7 @@
     updateMapToggleButtons();
     updateMapTargetControl();
     setLeafletBaseMap(state.baseMapMode);
+    void rebuildScene3dMap();
     syncMarker();
     syncObjectMarker();
     analyzeSelection();
